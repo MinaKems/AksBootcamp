@@ -1,0 +1,91 @@
+# Deploy to Azure Kubernetes Service
+# Build and push image to Azure Container Registry; Deploy to Azure Kubernetes Service
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: '6edc8b96-e72d-4209-b35f-978beaa31a6d'
+  backendImageRepository: 'backend'
+  frontendImageRepository: 'frontend'
+  containerRegistry: '[Put_Your_Container_Registry]'
+  dockerfileBackendPath: '$(Build.SourcesDirectory)/backend/Dockerfile'
+  dockerfileFrontendPath: '$(Build.SourcesDirectory)/frontend/Dockerfile'
+  tag: '$(Build.BuildId)'
+  imagePullSecret: '[Put_Your_Image_Pull_Secret]'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push backend images to Azure Container Registry
+      inputs:
+        command: buildAndPush
+        repository: $(backendImageRepository)
+        dockerfile: $(dockerfileBackendPath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+    - task: Docker@2
+      displayName: Build and push frontend images to Azure Container Registry
+      inputs:
+        command: buildAndPush
+        repository: $(frontendImageRepository)
+        dockerfile: $(dockerfileFrontendPath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+
+    - upload: kubernetes
+      artifact: kubernetes
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    pool:
+      vmImage: $(vmImageName)
+    environment: '[Put_Name_Environment]'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Kubernetes@1
+            displayName: Deploy the Backend on AKS
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: '[Put_Kubernetes_Endpoint]'
+              command: 'apply'
+              useConfigurationFile: true
+              configuration: '$(Pipeline.Workspace)/kubernetes/backend.yaml'
+              secretType: 'generic'
+              forceUpdate: false
+          - task: Kubernetes@1
+            displayName: Deploy the Frontend on AKS
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: '[Put_Kubernetes_Endpoint]'
+              command: 'apply'
+              useConfigurationFile: true
+              configuration: '$(Pipeline.Workspace)/kubernetes/frontend.yaml'
+              secretType: 'generic'
+              forceUpdate: false
